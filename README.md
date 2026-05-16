@@ -76,7 +76,7 @@ sudo vtysh -c "show bgp l2vpn evpn summary"   # BGP セッション
 
 | コマンド | 動作 |
 |----------|------|
-| `l2mesh status` | ノード情報 + ピア状態（ハンドシェイク・alive/stale/pending）|
+| `l2mesh status` | ノード/ピア/L2/FRR EVPN の状態をまとめて表示（後述の出力例参照）|
 | `l2mesh up` | VXLAN + bridge を作成（idempotent）、bridge IP・BUM(FDB) を state に合わせて同期。Root では `nolearning`、Leaf では learning |
 | `l2mesh down` | VXLAN + bridge を削除 |
 | `l2mesh root add --name N --pubkey K --endpoint E --ip I` | Root を追加（WG ピア + BUM 自動追加 + FRR BGP neighbor 追加）|
@@ -85,10 +85,33 @@ sudo vtysh -c "show bgp l2vpn evpn summary"   # BGP セッション
 | `l2mesh peer remove --name N` | Leaf を削除 |
 | `l2mesh peer list` | 全ピア一覧 |
 | `l2mesh sync` | state.json から kernel/FRR に全部反映: WG `ReplacePeers` + L2 up + FDB 同期 + FRR reload。boot 時 systemd 用 |
-| `l2mesh frr show` | state.json から生成された FRR 設定を stdout に表示（書き込みも reload もしない）|
-| `l2mesh frr apply` | FRR 設定を書いて `frr-reload.py` で差分反映（Leaf では no-op）|
+| `l2mesh frr show` | state.json から生成される FRR 設定を stdout に表示（書き込みも reload もしない、dry-run 用）|
 
 `--state PATH` でファイルパス指定可（既定: `/var/lib/l2mesh/state.json`）。
+
+### `l2mesh status` 出力例
+
+```
+Node:      aibauiha (role=root)
+Overlay:   100.64.0.1
+Endpoint:  [2001:db8::1]:51820
+Interface: wg-l2mesh (listen 51820)
+
+Configured peers: 1 (state) / 1 (kernel)
+
+KIND  NAME    OVERLAY     ENDPOINT             HANDSHAKE  WG     BGP
+root  anemos  100.64.0.2  anemos.example:51820  1m42s ago  alive  Established (rcv=3 snt=3)
+
+L2:
+  vxlan-l2mesh on br-l2mesh (vni=100, dstport=4789, mtu=1370)
+  Bridge addrs: 172.16.1.1/24
+
+FRR / EVPN:
+  BGP router-id: 100.64.0.1 (AS 65000)
+  VNI 100 (L2): 2 MACs, 4 ARPs, 1 remote VTEPs, advertise-svi-ip=Yes
+```
+
+FRR が未インストール / 未起動の場合、`FRR / EVPN:` セクションは "not available" と表示され、BGP 列は `-` になる（Leaf や pre-FRR セットアップでも壊れない）。
 
 ## NixOS との統合
 
