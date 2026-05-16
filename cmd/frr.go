@@ -20,7 +20,7 @@ var frrShowCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		cfg, err := frr.GenerateConfig(s)
+		cfg, err := frr.GenerateConfig(s, nil)
 		if err != nil {
 			return err
 		}

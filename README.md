@@ -189,11 +189,26 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-### 3+ Root mesh で BUM ループする話 (Phase 2b 未実装)
+### 3+ Root mesh で BUM ループする話 (Phase 2b: 部分実装)
 
 EVPN ingress replication + WG underlay (unicast only) で 3 Roots full-mesh だと BUM がループする。Linux kernel の source-VTEP split horizon は 1 hop 分しか効かないため。
 
-将来は agent が計算する MST を使って **FRR の BGP route-map を動的更新**、MST 枝以外からの Type-3 route を import 拒否する Phase 2b を予定 ([#16](https://github.com/chun37/l2mesh/issues/16))。それまでは中央 Root を star のハブにする運用で回避すること (2 Root + 任意の Leaf 数なら問題なし)。
+agent が計算する MST に基づき、**直接 peer な非 MST neighbor の Type-3 を route-map で block** する実装まで入ってる:
+
+- agent が MST 変化を検知 → `frr.Apply` で per-neighbor `route-map BLOCK_T3 in` を更新
+- 非 MST 直接 peer からの Type-3 はその場で reject される
+- 結果: 余分な direct Type-3 が消えて重複が減る
+
+ただし完全ではない:
+- RR が reflect した Type-3 (originator は非 MST、NH は MST neighbor via next-hop-self force) は通ってしまう
+- FRR は EVPN Type-3 の prefix 内に埋め込まれた originator VTEP を `match ip address prefix-list` で参照できないため、reflect 経路に対する filter は今の FRR では作れない
+- さらに reflect された Type-3 が installl される時、FDB の dst は **prefix 内の originator IP** (BGP NH ではない)。WG underlay でその originator に直接到達できないと BUM が落ちる
+
+実用上の挙動:
+- **2 Root + 任意 Leaf**: ループ起きない (3 ノード以下では構造的に不可)
+- **3+ Root full-mesh**: BLOCK_T3 で direct duplicate は減らせるが、完全な loop-free 保証には至らない。WG AllowedIPs catch-all + Root の `ip_forward` で transit を組む別の作業が必要
+
+3+ Root を実投入するときは中央 Root を star のハブにする運用が安全。
 
 書き込みは `state.json.lock` への `flock(LOCK_EX)` で直列化される（並列の `l2mesh add` でも安全）。書き換えは temp + rename で atomic。
 

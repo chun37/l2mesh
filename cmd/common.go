@@ -44,7 +44,7 @@ func applyFRRBestEffort(cmd *cobra.Command, s *state.State) {
 	if !frr.Installed() {
 		return
 	}
-	if err := frr.Apply(s); err != nil {
+	if err := frr.Apply(s, nil); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: FRR reload failed: %v\n", err)
 	}
 }
@@ -65,7 +65,7 @@ func reconcileKernel(cmd *cobra.Command, s *state.State) error {
 		return fmt.Errorf("l2 up: %w", err)
 	}
 	if frr.Installed() {
-		if err := frr.Apply(s); err != nil {
+		if err := frr.Apply(s, nil); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: FRR apply failed: %v\n", err)
 		}
 	}

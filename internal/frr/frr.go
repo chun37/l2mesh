@@ -22,6 +22,25 @@ const ConfigPath = "/var/lib/l2mesh/frr.conf"
 // upstream Roots in .Roots and .Leafs is empty.
 //
 // BFD profile l2mesh = 300ms tx/rx with multiplier 3 (≈1s failure detect).
+//
+// Type-3 (BUM) filtering: agent rewrites the MST_VTEPS prefix-list on each
+// MST change. route-map MST_T3 then accepts Type-3 routes only when the BGP
+// next-hop is in MST_VTEPS, so the kernel's vxlan BUM list (driven by FRR
+// from accepted Type-3 routes) follows the MST and 3+ Root meshes don't loop.
+// Phase 2b BUM tree filter (partial): for each BGP peer that is NOT in our
+// local MST, apply route-map BLOCK_T3 inbound. This blocks Type-3 routes
+// arriving directly from non-MST peers. Routes reflected by MST peers (with
+// NH rewritten via next-hop-self force) still pass — those convey BUM
+// destinations for nodes we can't reach directly anyway.
+//
+// Caveat: this prevents redundant Type-3 from non-MST direct peers, but the
+// FDB entry that zebra installs for a reflected Type-3 still uses the original
+// originator's VTEP IP as the dst (from the EVPN NLRI, not the BGP next-hop).
+// For a 3+ Root mesh that wants BUM transit through an intermediate Root, the
+// VTEP also has to be reachable via the underlay — i.e., the originator's
+// overlay IP must be in some WG peer's AllowedIPs. With our current /32-only
+// AllowedIPs and no transit catch-all that holds for the 2-Root + Leaves
+// topology but not yet for arbitrary 3+ Root meshes. See README "制約".
 const configTmpl = `frr defaults datacenter
 hostname {{.Node.Name}}
 !
@@ -32,6 +51,10 @@ bfd
   detect-multiplier 3
  exit
 exit
+!
+route-map BLOCK_T3 deny 10
+ match evpn route-type multicast
+route-map BLOCK_T3 permit 100
 !
 router bgp {{.Node.ASN}}
  bgp router-id {{.Node.OverlayIP}}
@@ -51,11 +74,17 @@ router bgp {{.Node.ASN}}
 {{- range .Roots}}
   neighbor {{.OverlayIP}} activate
   neighbor {{.OverlayIP}} next-hop-self force
+{{- if not (inMST .OverlayIP $.MSTNeighbors)}}
+  neighbor {{.OverlayIP}} route-map BLOCK_T3 in
+{{- end}}
 {{- end}}
 {{- range .Leafs}}
   neighbor {{.OverlayIP}} activate
   neighbor {{.OverlayIP}} route-reflector-client
   neighbor {{.OverlayIP}} next-hop-self force
+{{- if not (inMST .OverlayIP $.MSTNeighbors)}}
+  neighbor {{.OverlayIP}} route-map BLOCK_T3 in
+{{- end}}
 {{- end}}
   advertise-all-vni
   vni {{.L2.VNI}}
@@ -66,27 +95,52 @@ exit
 !
 `
 
-var tmpl = template.Must(template.New("frr").Parse(configTmpl))
+var tmpl = template.Must(template.New("frr").Funcs(template.FuncMap{
+	"inMST": func(ip string, mst []string) bool {
+		for _, m := range mst {
+			if m == ip {
+				return true
+			}
+		}
+		return false
+	},
+}).Parse(configTmpl))
+
+// configData wraps state.State with the dynamic MST_VTEPS list. We can't add
+// it to State directly because state.json doesn't carry MST info — it's
+// derived on the fly by the agent and passed through to the template.
+type configData struct {
+	*state.State
+	MSTNeighbors []string
+}
 
 // GenerateConfig renders the integrated FRR config for the given state.
-// Root vs Leaf is implicit in the slices: Roots fill .Roots and .Leafs;
-// Leaves fill only .Roots (with their upstream Roots).
-func GenerateConfig(s *state.State) (string, error) {
+//
+// mstNeighbors is the list of overlay IPs the local node treats as its
+// neighbors in the BUM spanning tree. When nil, fall back to all configured
+// peers (fail-open) — used by `l2mesh sync` and by the agent's first tick
+// before it has discovered the topology.
+func GenerateConfig(s *state.State, mstNeighbors []string) (string, error) {
+	if mstNeighbors == nil {
+		for _, p := range s.AllPeers() {
+			mstNeighbors = append(mstNeighbors, p.OverlayIP)
+		}
+	}
+	data := configData{State: s, MSTNeighbors: mstNeighbors}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, s); err != nil {
+	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("frr template: %w", err)
 	}
 	return buf.String(), nil
 }
 
 // Apply writes the generated config to ConfigPath and invokes frr-reload.py to
-// diff-apply it against the running FRR config. On Leaf nodes it writes the
-// minimal stub so demote cleans up any inherited BGP config.
-func Apply(s *state.State) error {
+// diff-apply it against the running FRR config.
+func Apply(s *state.State, mstNeighbors []string) error {
 	if !Installed() {
 		return nil
 	}
-	cfg, err := GenerateConfig(s)
+	cfg, err := GenerateConfig(s, mstNeighbors)
 	if err != nil {
 		return err
 	}
