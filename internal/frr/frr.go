@@ -32,6 +32,9 @@ router bgp {{.Node.ASN}}
   neighbor {{.OverlayIP}} activate
 {{- end}}
   advertise-all-vni
+  vni {{.L2.VNI}}
+   advertise-svi-ip
+  exit-vni
  exit-address-family
 exit
 !
