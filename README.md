@@ -89,6 +89,7 @@ sudo vtysh -c "show bgp l2vpn evpn summary"   # BGP セッション
 | `l2mesh peer add --name N --pubkey K --ip I` | Leaf を追加（endpoint なし、NAT 配下想定）|
 | `l2mesh peer remove --name N` | Leaf を削除 |
 | `l2mesh peer list` | 全ピア一覧 |
+| `l2mesh mac list` | EVPN MAC テーブル (local / remote)。各 MAC に紐づく IP・VTEP・peer 名を表示 |
 | `l2mesh sync` | state.json から kernel/FRR に全部反映: WG `ReplacePeers` + L2 up + FDB 同期 + FRR reload。boot 時 systemd 用 |
 | `l2mesh frr show` | state.json から生成される FRR 設定を stdout に表示（書き込みも reload もしない、dry-run 用）|
 
