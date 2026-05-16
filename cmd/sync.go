@@ -18,9 +18,9 @@ var syncCmd = &cobra.Command{
 		if err := reconcileKernel(cmd, s); err != nil {
 			return err
 		}
-		fmt.Printf("synced role=%s, %d peers on %s, %s/%s up, %d BUM peers\n",
+		fmt.Printf("synced role=%s, %d peers on %s, %s/%s up (BUM managed by l2mesh-agent)\n",
 			s.Node.Role, len(s.FlatPeers()), s.Node.Interface,
-			s.L2.VxlanIface, s.L2.BridgeIface, len(peerVTEPs(s)))
+			s.L2.VxlanIface, s.L2.BridgeIface)
 		return nil
 	},
 }

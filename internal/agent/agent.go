@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chun37/l2mesh/internal/l2"
 	"github.com/chun37/l2mesh/internal/state"
 	"github.com/chun37/l2mesh/internal/wg"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -170,10 +169,12 @@ func (a *Agent) tick(ctx context.Context) {
 	mst := ComputeMST(ips, edges)
 	treeIPs := LocalNeighbors(s.Node.OverlayIP, mst)
 
-	if err := l2.SyncFDB(s, treeIPs); err != nil {
-		a.logger.Printf("sync FDB: %v", err)
-		return
-	}
+	// NOTE: FRR/zebra owns the vxlan BUM FDB — Type-3 routes received from
+	// EVPN peers drive the 00:00:00 entries automatically. The MST we compute
+	// here is informational (served via /topology, logged on change). Loop
+	// prevention in 3+ Root meshes will land as Phase 2b: dynamically rewrite
+	// FRR's per-neighbor Type-3 import filter so only MST-neighbor routes are
+	// accepted.
 
 	a.mu.Lock()
 	changed := !sameStrings(a.lastTreeIPs, treeIPs)
@@ -181,7 +182,7 @@ func (a *Agent) tick(ctx context.Context) {
 	a.mu.Unlock()
 
 	if changed {
-		a.logger.Printf("MST: %d nodes, %d edges, local tree neighbors: [%s]",
+		a.logger.Printf("MST: %d nodes, %d edges, local tree neighbors: [%s] (informational; FRR owns BUM FDB)",
 			len(ips), len(mst), strings.Join(treeIPs, ", "))
 	}
 }

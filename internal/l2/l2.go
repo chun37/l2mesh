@@ -4,14 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"syscall"
 
 	"github.com/chun37/l2mesh/internal/state"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
-
-var zeroMAC, _ = net.ParseMAC("00:00:00:00:00:00")
 
 // Up ensures the bridge and VXLAN interfaces exist, attaches the VXLAN to the
 // bridge, attaches any configured local ports, applies configured bridge IP
@@ -93,53 +90,9 @@ func Down(s *state.State) error {
 	return nil
 }
 
-// SyncFDB reconciles the VXLAN broadcast/unknown/multicast (BUM) entries with
-// the desired peer VTEP list, adding/removing entries as needed. Pass the
-// overlay IPs of all peers whose traffic should be flooded to.
-func SyncFDB(s *state.State, peerVTEPs []string) error {
-	vxlan, err := netlink.LinkByName(s.L2.VxlanIface)
-	if err != nil {
-		return fmt.Errorf("lookup %s: %w", s.L2.VxlanIface, err)
-	}
-
-	current, err := netlink.NeighList(vxlan.Attrs().Index, syscall.AF_BRIDGE)
-	if err != nil {
-		return fmt.Errorf("list fdb: %w", err)
-	}
-
-	existing := map[string]bool{}
-	for _, n := range current {
-		if n.HardwareAddr.String() != zeroMAC.String() {
-			continue
-		}
-		if n.IP != nil {
-			existing[n.IP.String()] = true
-		}
-	}
-
-	desired := map[string]bool{}
-	for _, ip := range peerVTEPs {
-		desired[ip] = true
-	}
-
-	for ip := range desired {
-		if existing[ip] {
-			continue
-		}
-		if err := fdbAppend(vxlan, ip); err != nil {
-			return err
-		}
-	}
-	for ip := range existing {
-		if desired[ip] {
-			continue
-		}
-		if err := fdbDel(vxlan, ip); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// BUM FDB (00:00:00:00:00:00 entries on the vxlan) is owned by FRR/zebra now:
+// it derives them from received EVPN Type-3 routes. We previously had a
+// SyncFDB helper that fought FRR over these entries — removed.
 
 func ensureBridge(name string, mtu int) (netlink.Link, error) {
 	if link, err := netlink.LinkByName(name); err == nil {
@@ -178,43 +131,6 @@ func ensureVxlan(name string, vni, port, mtu int, local net.IP, learning bool) (
 		return nil, fmt.Errorf("add vxlan %s: %w", name, err)
 	}
 	return netlink.LinkByName(name)
-}
-
-func fdbAppend(vxlan netlink.Link, ip string) error {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return fmt.Errorf("invalid peer VTEP IP %q", ip)
-	}
-	neigh := &netlink.Neigh{
-		LinkIndex:    vxlan.Attrs().Index,
-		Family:       syscall.AF_BRIDGE,
-		State:        netlink.NUD_PERMANENT,
-		Flags:        netlink.NTF_SELF,
-		HardwareAddr: zeroMAC,
-		IP:           parsed,
-	}
-	if err := netlink.NeighAppend(neigh); err != nil {
-		return fmt.Errorf("fdb append %s: %w", ip, err)
-	}
-	return nil
-}
-
-func fdbDel(vxlan netlink.Link, ip string) error {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return fmt.Errorf("invalid peer VTEP IP %q", ip)
-	}
-	neigh := &netlink.Neigh{
-		LinkIndex:    vxlan.Attrs().Index,
-		Family:       syscall.AF_BRIDGE,
-		Flags:        netlink.NTF_SELF,
-		HardwareAddr: zeroMAC,
-		IP:           parsed,
-	}
-	if err := netlink.NeighDel(neigh); err != nil {
-		return fmt.Errorf("fdb del %s: %w", ip, err)
-	}
-	return nil
 }
 
 func isNotFound(err error) bool {

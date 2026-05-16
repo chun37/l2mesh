@@ -18,7 +18,6 @@ func runPeerAdd(cmd *cobra.Command, role state.Role, p state.Peer) error {
 		if err := applyToKernel(cmd, s.Node.Interface, p); err != nil {
 			return err
 		}
-		syncFDBBestEffort(cmd, s)
 		applyFRRBestEffort(cmd, s)
 		return nil
 	})
@@ -33,7 +32,6 @@ func runPeerRemove(cmd *cobra.Command, role state.Role, name string) error {
 		if err := removeFromKernel(cmd, s.Node.Interface, pubkey); err != nil {
 			return err
 		}
-		syncFDBBestEffort(cmd, s)
 		applyFRRBestEffort(cmd, s)
 		return nil
 	})
@@ -52,8 +50,8 @@ func applyFRRBestEffort(cmd *cobra.Command, s *state.State) {
 }
 
 // reconcileKernel pushes the in-memory state to the kernel (WG peers, L2
-// interfaces, BUM FDB) and FRR. Mirror of what `l2mesh sync` does but takes a
-// pre-loaded *State so it can run inside a WithLock callback.
+// interfaces) and FRR. BUM FDB is intentionally NOT touched here — that's
+// owned by `l2mesh agent`, which reconciles every tick from the MST.
 func reconcileKernel(cmd *cobra.Command, s *state.State) error {
 	wgClient, err := wg.New(s.Node.Interface)
 	if err != nil {
@@ -65,9 +63,6 @@ func reconcileKernel(cmd *cobra.Command, s *state.State) error {
 	}
 	if err := l2.Up(s); err != nil {
 		return fmt.Errorf("l2 up: %w", err)
-	}
-	if err := l2.SyncFDB(s, peerVTEPs(s)); err != nil {
-		return fmt.Errorf("fdb sync: %w", err)
 	}
 	if frr.Installed() {
 		if err := frr.Apply(s); err != nil {

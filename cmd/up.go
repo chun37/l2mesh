@@ -1,18 +1,15 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/chun37/l2mesh/internal/l2"
-	"github.com/chun37/l2mesh/internal/state"
 	"github.com/spf13/cobra"
-	"github.com/vishvananda/netlink"
 )
 
 var upCmd = &cobra.Command{
 	Use:   "up",
-	Short: "Bring up the VXLAN + bridge data plane and sync BUM entries",
+	Short: "Bring up the VXLAN + bridge data plane (BUM FDB is managed by l2mesh agent)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := loadState()
 		if err != nil {
@@ -21,11 +18,8 @@ var upCmd = &cobra.Command{
 		if err := l2.Up(s); err != nil {
 			return err
 		}
-		if err := l2.SyncFDB(s, peerVTEPs(s)); err != nil {
-			return err
-		}
-		fmt.Printf("up: %s on %s (vni=%d, port=%d, %d BUM peers)\n",
-			s.L2.VxlanIface, s.L2.BridgeIface, s.L2.VNI, s.L2.Port, len(peerVTEPs(s)))
+		fmt.Printf("up: %s on %s (vni=%d, port=%d)\n",
+			s.L2.VxlanIface, s.L2.BridgeIface, s.L2.VNI, s.L2.Port)
 		return nil
 	},
 }
@@ -46,35 +40,9 @@ var downCmd = &cobra.Command{
 	},
 }
 
-// peerVTEPs returns the overlay IPs of peers that should receive BUM via
-// ingress replication. Peers with TreeNeighbor=false are excluded so the
-// operator can build a loop-free BUM spanning tree across 3+ Roots.
-func peerVTEPs(s *state.State) []string {
-	out := make([]string, 0, len(s.Roots)+len(s.Leafs))
-	for _, p := range s.Roots {
-		if p.IsTreeNeighbor() {
-			out = append(out, p.OverlayIP)
-		}
-	}
-	for _, p := range s.Leafs {
-		if p.IsTreeNeighbor() {
-			out = append(out, p.OverlayIP)
-		}
-	}
-	return out
-}
-
-// syncFDBBestEffort calls SyncFDB but tolerates a missing VXLAN interface, so
-// that peer add/remove still succeeds before `l2mesh up` has been run.
-func syncFDBBestEffort(cmd *cobra.Command, s *state.State) {
-	if err := l2.SyncFDB(s, peerVTEPs(s)); err != nil {
-		var lnf netlink.LinkNotFoundError
-		if errors.As(err, &lnf) {
-			return
-		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: FDB sync failed: %v\n", err)
-	}
-}
+// BUM FDB is now owned exclusively by `l2mesh agent`. peer add / sync etc.
+// don't touch FDB; the agent's next tick (≤5s) installs the correct entries
+// from the MST.
 
 func init() {
 	rootCmd.AddCommand(upCmd, downCmd)

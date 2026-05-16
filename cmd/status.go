@@ -51,8 +51,7 @@ var statusCmd = &cobra.Command{
 		fr := frr.GetStatus(s.L2.VNI)
 
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "KIND\tNAME\tOVERLAY\tENDPOINT\tHANDSHAKE\tWG\tBGP\tTREE")
-		treeCount := 0
+		fmt.Fprintln(tw, "KIND\tNAME\tOVERLAY\tENDPOINT\tHANDSHAKE\tWG\tBGP")
 		for _, p := range s.AllPeers() {
 			key, err := wgtypes.ParseKey(p.PublicKey)
 			handshake := "-"
@@ -82,22 +81,11 @@ var statusCmd = &cobra.Command{
 				ep = "(dynamic)"
 			}
 			bgpState := bgpColumn(fr, p)
-			treeStr := "yes"
-			if !p.IsTreeNeighbor() {
-				treeStr = "no"
-			} else {
-				treeCount++
-			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				p.Kind, p.Name, p.OverlayIP, ep, handshake, wgState, bgpState, treeStr)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				p.Kind, p.Name, p.OverlayIP, ep, handshake, wgState, bgpState)
 		}
 		if err := tw.Flush(); err != nil {
 			return err
-		}
-
-		if len(s.AllPeers()) > 0 && treeCount == 0 {
-			fmt.Fprintln(cmd.ErrOrStderr(),
-				"\nwarning: every peer has tree_neighbor=false — BUM (broadcast/ARP/etc.) won't reach anyone")
 		}
 
 		printL2Section(cmd, s)
