@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/chun37/l2mesh/internal/frr"
 	"github.com/chun37/l2mesh/internal/state"
 	"github.com/chun37/l2mesh/internal/wg"
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ func runPeerAdd(cmd *cobra.Command, role state.Role, p state.Peer) error {
 			return err
 		}
 		syncFDBBestEffort(cmd, s)
+		applyFRRBestEffort(cmd, s)
 		return nil
 	})
 }
@@ -31,21 +33,37 @@ func runPeerRemove(cmd *cobra.Command, role state.Role, name string) error {
 			return err
 		}
 		syncFDBBestEffort(cmd, s)
+		applyFRRBestEffort(cmd, s)
 		return nil
 	})
 }
 
-// If the WG interface is unavailable, log a warning and let the state change
-// stand; the boot-time `l2mesh sync` will reconcile the kernel later.
+// applyFRRBestEffort reapplies the FRR config after a peer change. Failures are
+// reported as warnings so the state change still persists; the next `l2mesh sync`
+// (or `l2mesh frr apply`) can retry.
+func applyFRRBestEffort(cmd *cobra.Command, s *state.State) {
+	if s.Node.Role != state.RoleRoot {
+		return
+	}
+	if !frr.Installed() {
+		return
+	}
+	if err := frr.Apply(s); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: FRR reload failed: %v\n", err)
+	}
+}
+
+// Kernel WG updates are best-effort: if they fail the state.json change still
+// persists, and the next `l2mesh sync` will reconcile the kernel.
 func applyToKernel(cmd *cobra.Command, iface string, p state.Peer) error {
 	client, err := wg.New(iface)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: WG iface %q unavailable, state saved only: %v\n", iface, err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: WG iface %q unavailable: %v\n", iface, err)
 		return nil
 	}
 	defer client.Close()
 	if err := client.AddOrUpdatePeer(p); err != nil {
-		return fmt.Errorf("kernel apply: %w (state saved)", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: kernel apply failed: %v\n", err)
 	}
 	return nil
 }
@@ -53,12 +71,12 @@ func applyToKernel(cmd *cobra.Command, iface string, p state.Peer) error {
 func removeFromKernel(cmd *cobra.Command, iface, pubkey string) error {
 	client, err := wg.New(iface)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: WG iface %q unavailable, state saved only: %v\n", iface, err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: WG iface %q unavailable: %v\n", iface, err)
 		return nil
 	}
 	defer client.Close()
 	if err := client.RemovePeer(pubkey); err != nil {
-		return fmt.Errorf("kernel remove: %w (state saved)", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: kernel remove failed: %v\n", err)
 	}
 	return nil
 }

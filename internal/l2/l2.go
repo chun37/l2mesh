@@ -31,7 +31,11 @@ func Up(s *state.State) error {
 		return err
 	}
 
-	vxlan, err := ensureVxlan(s.L2.VxlanIface, int(s.L2.VNI), int(s.L2.Port), int(s.L2.MTU), overlay.To4())
+	// Root with EVPN must use nolearning so the FDB is populated by BGP Type-2
+	// routes only — kernel learning would race EVPN and reintroduce loops on
+	// 3+ Root meshes. Leaf still uses learning (receives from Primary Root).
+	learning := s.Node.Role != state.RoleRoot
+	vxlan, err := ensureVxlan(s.L2.VxlanIface, int(s.L2.VNI), int(s.L2.Port), int(s.L2.MTU), overlay.To4(), learning)
 	if err != nil {
 		return err
 	}
@@ -141,9 +145,16 @@ func ensureBridge(name string, mtu int) (netlink.Link, error) {
 	return netlink.LinkByName(name)
 }
 
-func ensureVxlan(name string, vni, port, mtu int, local net.IP) (netlink.Link, error) {
+func ensureVxlan(name string, vni, port, mtu int, local net.IP, learning bool) (netlink.Link, error) {
 	if link, err := netlink.LinkByName(name); err == nil {
-		return link, nil
+		// Recreate if the learning flag drifted (e.g. role flipped between
+		// leaf and root); kernel doesn't expose the attribute as mutable.
+		if vx, ok := link.(*netlink.Vxlan); ok && vx.Learning == learning {
+			return link, nil
+		}
+		if err := netlink.LinkDel(link); err != nil {
+			return nil, fmt.Errorf("recreate %s (learning flag changed): %w", name, err)
+		}
 	} else if !isNotFound(err) {
 		return nil, fmt.Errorf("lookup %s: %w", name, err)
 	}
@@ -152,7 +163,7 @@ func ensureVxlan(name string, vni, port, mtu int, local net.IP) (netlink.Link, e
 		VxlanId:   vni,
 		SrcAddr:   local,
 		Port:      port,
-		Learning:  true,
+		Learning:  learning,
 	}
 	if err := netlink.LinkAdd(v); err != nil {
 		return nil, fmt.Errorf("add vxlan %s: %w", name, err)
