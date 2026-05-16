@@ -1,0 +1,17 @@
+# Built binary
+/l2mesh
+
+# State / secrets (never commit)
+state.json
+*.lock
+wg-*.key
+
+# Local dev
+/dist/
+/tmp/
+*.tmp
+
+# Editor
+.vscode/
+.idea/
+*.swp
