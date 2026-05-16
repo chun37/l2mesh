@@ -8,13 +8,14 @@ import (
 
 	"github.com/chun37/l2mesh/internal/state"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 var zeroMAC, _ = net.ParseMAC("00:00:00:00:00:00")
 
 // Up ensures the bridge and VXLAN interfaces exist, attaches the VXLAN to the
-// bridge, attaches any configured local ports, and brings everything up.
-// Idempotent.
+// bridge, attaches any configured local ports, applies configured bridge IP
+// addresses, and brings everything up. Idempotent.
 func Up(s *state.State) error {
 	overlay := net.ParseIP(s.Node.OverlayIP)
 	if overlay == nil || overlay.To4() == nil {
@@ -23,6 +24,10 @@ func Up(s *state.State) error {
 
 	bridge, err := ensureBridge(s.L2.BridgeIface, int(s.L2.MTU))
 	if err != nil {
+		return err
+	}
+
+	if err := syncBridgeAddrs(bridge, s.L2.BridgeAddrs); err != nil {
 		return err
 	}
 
@@ -195,4 +200,62 @@ func fdbDel(vxlan netlink.Link, ip string) error {
 func isNotFound(err error) bool {
 	var lnf netlink.LinkNotFoundError
 	return errors.As(err, &lnf)
+}
+
+// syncBridgeAddrs makes the bridge's addresses match desired exactly. Only
+// global-scope addresses are reconciled — kernel-assigned link-local (fe80::)
+// is left alone.
+func syncBridgeAddrs(bridge netlink.Link, desired []string) error {
+	wanted := make([]*netlink.Addr, 0, len(desired))
+	for _, cidr := range desired {
+		addr, err := netlink.ParseAddr(cidr)
+		if err != nil {
+			return fmt.Errorf("parse bridge addr %q: %w", cidr, err)
+		}
+		wanted = append(wanted, addr)
+	}
+
+	current, err := netlink.AddrList(bridge, netlink.FAMILY_ALL)
+	if err != nil {
+		return fmt.Errorf("list bridge addrs: %w", err)
+	}
+
+	for _, want := range wanted {
+		if hasAddr(current, want) {
+			continue
+		}
+		if err := netlink.AddrAdd(bridge, want); err != nil {
+			return fmt.Errorf("add bridge addr %s: %w", want.IPNet.String(), err)
+		}
+	}
+	for i := range current {
+		have := &current[i]
+		if have.Scope != unix.RT_SCOPE_UNIVERSE {
+			continue
+		}
+		if hasAddr(wantedAsAddrs(wanted), have) {
+			continue
+		}
+		if err := netlink.AddrDel(bridge, have); err != nil {
+			return fmt.Errorf("del bridge addr %s: %w", have.IPNet.String(), err)
+		}
+	}
+	return nil
+}
+
+func hasAddr(list []netlink.Addr, target *netlink.Addr) bool {
+	for i := range list {
+		if list[i].Equal(*target) {
+			return true
+		}
+	}
+	return false
+}
+
+func wantedAsAddrs(p []*netlink.Addr) []netlink.Addr {
+	out := make([]netlink.Addr, len(p))
+	for i, a := range p {
+		out[i] = *a
+	}
+	return out
 }

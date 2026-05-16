@@ -46,6 +46,7 @@ type L2Config struct {
 	Port        uint16   `json:"port"`
 	MTU         uint32   `json:"mtu,omitempty"`
 	LocalPorts  []string `json:"local_ports,omitempty"`
+	BridgeAddrs []string `json:"bridge_addrs,omitempty"`
 }
 
 // AnnotatedPeer is a Peer paired with its Role, for display.
