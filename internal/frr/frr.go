@@ -50,10 +50,12 @@ router bgp {{.Node.ASN}}
  address-family l2vpn evpn
 {{- range .Roots}}
   neighbor {{.OverlayIP}} activate
+  neighbor {{.OverlayIP}} next-hop-self
 {{- end}}
 {{- range .Leafs}}
   neighbor {{.OverlayIP}} activate
   neighbor {{.OverlayIP}} route-reflector-client
+  neighbor {{.OverlayIP}} next-hop-self
 {{- end}}
   advertise-all-vni
   vni {{.L2.VNI}}

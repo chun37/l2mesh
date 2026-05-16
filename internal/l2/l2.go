@@ -43,6 +43,16 @@ func Up(s *state.State) error {
 		return fmt.Errorf("attach %s to %s: %w", s.L2.VxlanIface, s.L2.BridgeIface, err)
 	}
 
+	// Hairpin lets the bridge re-forward a frame back out the same vxlan port,
+	// which is needed for Root transit: anemos → aibauiha (decap) → bridge
+	// → vxlan (re-encap) → leaf. Leaves never receive transit traffic (Roots
+	// rewrite next-hop to themselves on advertised EVPN routes), so hairpin
+	// is only enabled on Roots to keep stray transit on Leaves loud.
+	hairpin := s.Node.Role == state.RoleRoot
+	if err := netlink.LinkSetHairpin(vxlan, hairpin); err != nil {
+		return fmt.Errorf("set hairpin on %s: %w", s.L2.VxlanIface, err)
+	}
+
 	for _, port := range s.L2.LocalPorts {
 		link, err := netlink.LinkByName(port)
 		if err != nil {
