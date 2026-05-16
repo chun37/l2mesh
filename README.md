@@ -52,30 +52,35 @@ WireGuard インターフェース・FRR 本体は外で先に用意しておく
 ## クイックスタート
 
 ```bash
-# 1. プレースホルダ state.json を生成 (l2mesh status はファイルが無ければ作る)
-sudo l2mesh status
+# 1. 自ノードの identity を state.json に書く (対話 or フラグ)
+sudo l2mesh init \
+  --name my-node \
+  --role root \
+  --overlay-ip 100.64.0.1 \
+  --endpoint '[2001:db8::1]:51820'
 
-# 2. /var/lib/l2mesh/state.json の node セクションを編集 (name / overlay_ip / endpoint / interface)
-
-# 3. 他 Root を追加
+# 2. 他 Root を追加
 sudo l2mesh root add \
   --name root-b \
   --pubkey '<相手の WG 公開鍵>' \
   --endpoint '[2001:db8::2]:51820' \
   --ip 100.64.0.2
 
-# 4. VXLAN/bridge を up + BUM 同期 + FRR reload (sync は全部やる)
+# 3. VXLAN/bridge を up + BUM 同期 + FRR reload (sync は全部やる)
 sudo l2mesh sync
 
-# 5. 状態確認
+# 4. 状態確認
 sudo l2mesh status
 sudo vtysh -c "show bgp l2vpn evpn summary"   # BGP セッション
 ```
+
+`init` はフラグ未指定の項目を TTY なら対話入力する。`bridge_addrs` などの L2 詳細はデフォルトで書かれるので、必要なら `/var/lib/l2mesh/state.json` を直接編集する。
 
 ## コマンド
 
 | コマンド | 動作 |
 |----------|------|
+| `l2mesh init [--name N --role root\|leaf --overlay-ip I --endpoint E] [--force]` | state.json を初期化（既存があれば error、`--force` で上書き）。TTY なら省略フラグを対話入力 |
 | `l2mesh status` | ノード/ピア/L2/FRR EVPN の状態をまとめて表示（後述の出力例参照）|
 | `l2mesh up` | VXLAN + bridge を作成（idempotent）、bridge IP・BUM(FDB) を state に合わせて同期。Root では `nolearning`、Leaf では learning |
 | `l2mesh down` | VXLAN + bridge を削除 |

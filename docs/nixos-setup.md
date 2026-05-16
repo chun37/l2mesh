@@ -73,7 +73,17 @@ sudo install -m 0755 l2mesh /usr/local/bin/l2mesh
 
 ## state.json 初期化
 
-`/var/lib/l2mesh/state.json` を `sudo l2mesh status` で生成 → `node` セクションを編集 (`name` / `overlay_ip` / `endpoint` / `interface`)。詳細は [README の state.json スキーマ](../README.md#statejson-スキーマ) を参照。
+`sudo l2mesh init` で対話入力 (or フラグ指定) して `/var/lib/l2mesh/state.json` を作成:
+
+```bash
+sudo l2mesh init \
+  --name my-node \
+  --role root \
+  --overlay-ip 100.64.0.1 \
+  --endpoint '[2001:db8::1]:51820'
+```
+
+L2 / `bridge_addrs` などのデフォルト・スキーマ詳細は [README の state.json スキーマ](../README.md#statejson-スキーマ) を参照。
 
 ## ファイアウォール (nftables)
 

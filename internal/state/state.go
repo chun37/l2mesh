@@ -62,9 +62,14 @@ type State struct {
 	Leafs []Peer   `json:"leafs"`
 }
 
-// defaultState returns a placeholder used when no state.json exists yet.
-// Operators are expected to overwrite Node fields via `l2mesh init` or by
-// editing the file before running other commands.
+// Default returns a fresh State populated with defaults. Operators are
+// expected to overwrite Node fields via `l2mesh init` or by editing the file
+// before running other commands.
+func Default() *State {
+	s := defaultState()
+	return &s
+}
+
 func defaultState() State {
 	return State{
 		Node: Node{

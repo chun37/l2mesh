@@ -58,40 +58,29 @@ install -m 0755 l2mesh /usr/local/bin/
 mkdir -p /var/lib/l2mesh
 ```
 
-## 5. `/var/lib/l2mesh/state.json` 作成
+## 5. state.json 初期化
 
-```json
-{
-  "node": {
-    "name": "my-node",
-    "role": "root",
-    "overlay_ip": "100.64.0.2",
-    "endpoint": "my-public-host:51820",
-    "asn": 65000,
-    "listen_port": 51820,
-    "interface": "wg-l2mesh"
-  },
-  "l2": {
-    "vxlan_iface": "vxlan-l2mesh",
-    "bridge_iface": "br-l2mesh",
-    "vni": 100,
-    "port": 4789,
-    "mtu": 1370,
-    "bridge_addrs": ["172.16.1.2/24"]
-  },
-  "roots": [
-    {
-      "name": "peer-root",
-      "pubkey": "<相手Rootの公開鍵>",
-      "overlay_ip": "100.64.0.1",
-      "endpoint": "[peer-host]:51820"
-    }
-  ],
-  "leafs": []
-}
+`l2mesh init` で自ノードの identity を書き込む:
+
+```bash
+sudo l2mesh init \
+  --name my-node \
+  --role root \
+  --overlay-ip 100.64.0.2 \
+  --endpoint my-public-host:51820
 ```
 
-`asn` は全 Root で同一にすること (iBGP)。`overlay_ip` は Mesh 内で一意な `100.64.0.0/24` の IP。
+フラグを省略すると TTY 上で対話入力。`asn` は全 Root で同一にすること (iBGP, デフォルト 65000)。`overlay_ip` は Mesh 内で一意な `100.64.0.0/24` の IP。
+
+L2 のデフォルト (`vxlan-l2mesh` / `br-l2mesh`, VNI 100 等) は自動で書かれる。`bridge_addrs` を付けたい場合は init 後に `/var/lib/l2mesh/state.json` を直接編集して `l2.bridge_addrs: ["172.16.1.2/24"]` を足す。Root の追加も同様に `l2mesh root add` で行うか、state.json を編集する:
+
+```bash
+sudo l2mesh root add \
+  --name peer-root \
+  --pubkey '<相手Rootの公開鍵>' \
+  --endpoint '[peer-host]:51820' \
+  --ip 100.64.0.1
+```
 
 ## 6. systemd unit
 
