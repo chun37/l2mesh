@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/chun37/l2mesh/internal/frr"
+	"github.com/chun37/l2mesh/internal/state"
 	"github.com/chun37/l2mesh/internal/wg"
 	"github.com/spf13/cobra"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -45,41 +48,90 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Configured peers: %d (state) / %d (kernel)\n\n",
 			len(s.Roots)+len(s.Leafs), len(dev.Peers))
 
+		fr := frr.GetStatus(s.L2.VNI)
+
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "KIND\tNAME\tOVERLAY\tENDPOINT\tHANDSHAKE\tSTATUS")
+		fmt.Fprintln(tw, "KIND\tNAME\tOVERLAY\tENDPOINT\tHANDSHAKE\tWG\tBGP")
 		for _, p := range s.AllPeers() {
 			key, err := wgtypes.ParseKey(p.PublicKey)
 			handshake := "-"
-			status := "unknown"
+			wgState := "unknown"
 			if err == nil {
 				if kp, ok := live[key]; ok {
 					if kp.LastHandshakeTime.IsZero() {
 						handshake = "never"
-						status = "pending"
+						wgState = "pending"
 					} else {
 						age := time.Since(kp.LastHandshakeTime).Round(time.Second)
 						handshake = age.String() + " ago"
 						if age < 3*time.Minute {
-							status = "alive"
+							wgState = "alive"
 						} else {
-							status = "stale"
+							wgState = "stale"
 						}
 					}
 				} else {
-					status = "missing-in-kernel"
+					wgState = "missing-in-kernel"
 				}
 			} else {
-				status = "bad-pubkey"
+				wgState = "bad-pubkey"
 			}
 			ep := p.Endpoint
 			if ep == "" {
 				ep = "(dynamic)"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				p.Kind, p.Name, p.OverlayIP, ep, handshake, status)
+			bgpState := bgpColumn(fr, p)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				p.Kind, p.Name, p.OverlayIP, ep, handshake, wgState, bgpState)
 		}
-		return tw.Flush()
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+
+		printL2Section(cmd, s)
+		printFRRSection(cmd, &fr)
+		return nil
 	},
+}
+
+func bgpColumn(fr frr.Status, p state.AnnotatedPeer) string {
+	if !fr.Available || p.Kind != state.RoleRoot {
+		return "-"
+	}
+	peer := fr.PeerByOverlayIP(p.OverlayIP)
+	if peer == nil {
+		return "not-configured"
+	}
+	return fmt.Sprintf("%s (rcv=%d snt=%d)", peer.State, peer.PfxRcvd, peer.PfxSent)
+}
+
+func printL2Section(cmd *cobra.Command, s *state.State) {
+	fmt.Fprintln(cmd.OutOrStdout())
+	fmt.Fprintln(cmd.OutOrStdout(), "L2:")
+	fmt.Fprintf(cmd.OutOrStdout(), "  %s on %s (vni=%d, dstport=%d, mtu=%d)\n",
+		s.L2.VxlanIface, s.L2.BridgeIface, s.L2.VNI, s.L2.Port, s.L2.MTU)
+	if len(s.L2.BridgeAddrs) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Bridge addrs: %s\n", strings.Join(s.L2.BridgeAddrs, ", "))
+	}
+	if len(s.L2.LocalPorts) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Local ports: %s\n", strings.Join(s.L2.LocalPorts, ", "))
+	}
+}
+
+func printFRRSection(cmd *cobra.Command, fr *frr.Status) {
+	fmt.Fprintln(cmd.OutOrStdout())
+	fmt.Fprintln(cmd.OutOrStdout(), "FRR / EVPN:")
+	if !fr.Available {
+		fmt.Fprintln(cmd.OutOrStdout(), "  (FRR not available — vtysh missing or BGP not running)")
+		return
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "  BGP router-id: %s (AS %d)\n", fr.RouterID, fr.LocalAS)
+	if fr.VNI != nil {
+		v := fr.VNI
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"  VNI %d (%s): %d MACs, %d ARPs, %d remote VTEPs, advertise-svi-ip=%s\n",
+			v.VNI, v.Type, v.NumMACs, v.NumARPs, v.NumRemoteVTEPs, v.AdvertiseSVIMacIP)
+	}
 }
 
 func init() {
