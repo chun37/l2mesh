@@ -13,7 +13,11 @@ func runPeerAdd(cmd *cobra.Command, role state.Role, p state.Peer) error {
 		if err := s.AddPeer(role, p); err != nil {
 			return err
 		}
-		return applyToKernel(cmd, s.Node.Interface, p)
+		if err := applyToKernel(cmd, s.Node.Interface, p); err != nil {
+			return err
+		}
+		syncFDBBestEffort(cmd, s)
+		return nil
 	})
 }
 
@@ -23,7 +27,11 @@ func runPeerRemove(cmd *cobra.Command, role state.Role, name string) error {
 		if err != nil {
 			return err
 		}
-		return removeFromKernel(cmd, s.Node.Interface, pubkey)
+		if err := removeFromKernel(cmd, s.Node.Interface, pubkey); err != nil {
+			return err
+		}
+		syncFDBBestEffort(cmd, s)
+		return nil
 	})
 }
 

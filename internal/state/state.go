@@ -37,6 +37,17 @@ type Peer struct {
 	Endpoint  string `json:"endpoint,omitempty"`
 }
 
+// L2Config describes the VXLAN + bridge data plane that rides on top of the
+// WireGuard overlay. Defaults are filled in by defaultState() / Load().
+type L2Config struct {
+	VxlanIface  string   `json:"vxlan_iface"`
+	BridgeIface string   `json:"bridge_iface"`
+	VNI         uint32   `json:"vni"`
+	Port        uint16   `json:"port"`
+	MTU         uint32   `json:"mtu,omitempty"`
+	LocalPorts  []string `json:"local_ports,omitempty"`
+}
+
 // AnnotatedPeer is a Peer paired with its Role, for display.
 type AnnotatedPeer struct {
 	Peer
@@ -44,9 +55,10 @@ type AnnotatedPeer struct {
 }
 
 type State struct {
-	Node  Node   `json:"node"`
-	Roots []Peer `json:"roots"`
-	Leafs []Peer `json:"leafs"`
+	Node  Node     `json:"node"`
+	L2    L2Config `json:"l2"`
+	Roots []Peer   `json:"roots"`
+	Leafs []Peer   `json:"leafs"`
 }
 
 // defaultState returns a placeholder used when no state.json exists yet.
@@ -63,8 +75,19 @@ func defaultState() State {
 			ListenPort: 51820,
 			Interface:  "wg-l2mesh",
 		},
+		L2:    defaultL2(),
 		Roots: []Peer{},
 		Leafs: []Peer{},
+	}
+}
+
+func defaultL2() L2Config {
+	return L2Config{
+		VxlanIface:  "vxlan-l2mesh",
+		BridgeIface: "br-l2mesh",
+		VNI:         100,
+		Port:        4789,
+		MTU:         1370,
 	}
 }
 
@@ -81,7 +104,29 @@ func Load(path string) (*State, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("parse state: %w", err)
 	}
+	fillL2Defaults(&s.L2)
 	return &s, nil
+}
+
+// fillL2Defaults applies default values for any L2 fields left zero by
+// older state.json files that predate the L2 section.
+func fillL2Defaults(c *L2Config) {
+	d := defaultL2()
+	if c.VxlanIface == "" {
+		c.VxlanIface = d.VxlanIface
+	}
+	if c.BridgeIface == "" {
+		c.BridgeIface = d.BridgeIface
+	}
+	if c.VNI == 0 {
+		c.VNI = d.VNI
+	}
+	if c.Port == 0 {
+		c.Port = d.Port
+	}
+	if c.MTU == 0 {
+		c.MTU = d.MTU
+	}
 }
 
 func (s *State) Save(path string) error {
