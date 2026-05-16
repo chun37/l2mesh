@@ -95,7 +95,7 @@ var statusCmd = &cobra.Command{
 }
 
 func bgpColumn(fr frr.Status, p state.AnnotatedPeer) string {
-	if !fr.Available || p.Kind != state.RoleRoot {
+	if !fr.Available {
 		return "-"
 	}
 	peer := fr.PeerByOverlayIP(p.OverlayIP)
