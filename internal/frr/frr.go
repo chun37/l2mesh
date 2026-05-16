@@ -16,8 +16,22 @@ import (
 
 const ConfigPath = "/var/lib/l2mesh/frr.conf"
 
-const rootConfigTmpl = `frr defaults datacenter
+// Single template for all roles (Plan B). Root vs Leaf differs only by which
+// slices populate neighbor blocks: a Root has other Roots in .Roots (regular
+// iBGP) and its downstream Leaves in .Leafs (RR clients); a Leaf has its
+// upstream Roots in .Roots and .Leafs is empty.
+//
+// BFD profile l2mesh = 300ms tx/rx with multiplier 3 (≈1s failure detect).
+const configTmpl = `frr defaults datacenter
 hostname {{.Node.Name}}
+!
+bfd
+ profile l2mesh
+  receive-interval 300
+  transmit-interval 300
+  detect-multiplier 3
+ exit
+exit
 !
 router bgp {{.Node.ASN}}
  bgp router-id {{.Node.OverlayIP}}
@@ -25,11 +39,21 @@ router bgp {{.Node.ASN}}
 {{- range .Roots}}
  neighbor {{.OverlayIP}} remote-as {{$.Node.ASN}}
  neighbor {{.OverlayIP}} update-source {{$.Node.OverlayIP}}
+ neighbor {{.OverlayIP}} bfd profile l2mesh
+{{- end}}
+{{- range .Leafs}}
+ neighbor {{.OverlayIP}} remote-as {{$.Node.ASN}}
+ neighbor {{.OverlayIP}} update-source {{$.Node.OverlayIP}}
+ neighbor {{.OverlayIP}} bfd profile l2mesh
 {{- end}}
  !
  address-family l2vpn evpn
 {{- range .Roots}}
   neighbor {{.OverlayIP}} activate
+{{- end}}
+{{- range .Leafs}}
+  neighbor {{.OverlayIP}} activate
+  neighbor {{.OverlayIP}} route-reflector-client
 {{- end}}
   advertise-all-vni
   vni {{.L2.VNI}}
@@ -40,29 +64,14 @@ exit
 !
 `
 
-// Leaf nodes don't run BGP — the minimal config just keeps the hostname so
-// that frr-reload.py removes any prior router-bgp block when transitioning
-// Root → Leaf via demote.
-const leafConfigTmpl = `frr defaults datacenter
-hostname {{.Node.Name}}
-!
-`
+var tmpl = template.Must(template.New("frr").Parse(configTmpl))
 
-var (
-	rootTmpl = template.Must(template.New("frr-root").Parse(rootConfigTmpl))
-	leafTmpl = template.Must(template.New("frr-leaf").Parse(leafConfigTmpl))
-)
-
-// GenerateConfig renders the integrated FRR config for the given state. Root
-// nodes get the full BGP + EVPN block; Leaf nodes get a minimal stub so any
-// prior BGP config gets removed by frr-reload.py on demote.
+// GenerateConfig renders the integrated FRR config for the given state.
+// Root vs Leaf is implicit in the slices: Roots fill .Roots and .Leafs;
+// Leaves fill only .Roots (with their upstream Roots).
 func GenerateConfig(s *state.State) (string, error) {
 	var buf bytes.Buffer
-	t := rootTmpl
-	if s.Node.Role != state.RoleRoot {
-		t = leafTmpl
-	}
-	if err := t.Execute(&buf, s); err != nil {
+	if err := tmpl.Execute(&buf, s); err != nil {
 		return "", fmt.Errorf("frr template: %w", err)
 	}
 	return buf.String(), nil

@@ -16,8 +16,9 @@ NixOS 25.05 以降を想定。FRR は `services.frr` モジュール経由でイ
     peers = [ ];   # ★ 空のまま。ピアは l2mesh が runtime で管理
   };
 
-  # bgpd を有効化 (zebra は services.frr 内で常時有効化される)
+  # bgpd + bfdd を有効化 (zebra は services.frr 内で常時有効化される)
   services.frr.bgpd.enable = true;
+  services.frr.bfdd.enable = true;
 
   environment.systemPackages = [ pkgs.wireguard-tools pkgs.frr ];
 
@@ -28,9 +29,9 @@ NixOS 25.05 以降を想定。FRR は `services.frr` モジュール経由でイ
 
   systemd.services.l2mesh-sync = {
     description = "L2 Mesh agent: sync WireGuard peers, VXLAN, FRR from state.json";
-    after = [ "wireguard-wg-l2mesh.service" "bgpd.service" ];
+    after = [ "wireguard-wg-l2mesh.service" "bgpd.service" "bfdd.service" ];
     requires = [ "wireguard-wg-l2mesh.service" ];
-    wants = [ "bgpd.service" ];
+    wants = [ "bgpd.service" "bfdd.service" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       Type = "oneshot";

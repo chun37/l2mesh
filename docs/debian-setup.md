@@ -11,14 +11,15 @@ apt install -y wireguard wireguard-tools frr frr-pythontools git golang
 
 `frr-pythontools` は `frr-reload.py` を提供する。
 
-## 2. FRR の bgpd を有効化
+## 2. FRR の bgpd / bfdd を有効化
 
 ```bash
 sed -i 's/^bgpd=no/bgpd=yes/' /etc/frr/daemons
+sed -i 's/^bfdd=no/bfdd=yes/' /etc/frr/daemons
 systemctl restart frr
 ```
 
-`/etc/frr/vtysh.conf` に `service integrated-vtysh-config` があることを確認。なければ追記。
+`/etc/frr/vtysh.conf` に `service integrated-vtysh-config` があることを確認。なければ追記。BFD は sub-second 単位の peer 死活検出に使う (Plan B 採用)。
 
 ## 3. WireGuard 鍵生成 + インターフェース起動
 

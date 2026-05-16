@@ -31,11 +31,10 @@ func Up(s *state.State) error {
 		return err
 	}
 
-	// Root with EVPN must use nolearning so the FDB is populated by BGP Type-2
-	// routes only — kernel learning would race EVPN and reintroduce loops on
-	// 3+ Root meshes. Leaf still uses learning (receives from Primary Root).
-	learning := s.Node.Role != state.RoleRoot
-	vxlan, err := ensureVxlan(s.L2.VxlanIface, int(s.L2.VNI), int(s.L2.Port), int(s.L2.MTU), overlay.To4(), learning)
+	// Plan B: every node runs FRR/EVPN, so VXLAN is always nolearning. The FDB
+	// is populated by BGP Type-2 routes; kernel auto-learning would race EVPN
+	// and reintroduce loops in 3+ node meshes.
+	vxlan, err := ensureVxlan(s.L2.VxlanIface, int(s.L2.VNI), int(s.L2.Port), int(s.L2.MTU), overlay.To4(), false)
 	if err != nil {
 		return err
 	}
