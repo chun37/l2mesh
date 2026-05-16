@@ -46,13 +46,20 @@ var downCmd = &cobra.Command{
 	},
 }
 
+// peerVTEPs returns the overlay IPs of peers that should receive BUM via
+// ingress replication. Peers with TreeNeighbor=false are excluded so the
+// operator can build a loop-free BUM spanning tree across 3+ Roots.
 func peerVTEPs(s *state.State) []string {
 	out := make([]string, 0, len(s.Roots)+len(s.Leafs))
 	for _, p := range s.Roots {
-		out = append(out, p.OverlayIP)
+		if p.IsTreeNeighbor() {
+			out = append(out, p.OverlayIP)
+		}
 	}
 	for _, p := range s.Leafs {
-		out = append(out, p.OverlayIP)
+		if p.IsTreeNeighbor() {
+			out = append(out, p.OverlayIP)
+		}
 	}
 	return out
 }

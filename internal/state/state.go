@@ -35,6 +35,19 @@ type Peer struct {
 	PublicKey string `json:"pubkey"`
 	OverlayIP string `json:"overlay_ip"`
 	Endpoint  string `json:"endpoint,omitempty"`
+	// TreeNeighbor controls whether BUM (broadcast/unknown unicast/multicast)
+	// is replicated to this peer. nil/missing in JSON means true (default in
+	// BUM tree). Set false to exclude a peer — combined with the kernel's
+	// source-VTEP split horizon this lets us build a loop-free BUM spanning
+	// tree across a 3+ Root mesh.
+	TreeNeighbor *bool `json:"tree_neighbor,omitempty"`
+}
+
+// IsTreeNeighbor reports whether this peer is in the local BUM forwarding tree.
+// Default true (when the field is absent) preserves the all-peers behavior we
+// had before Phase 1; explicit false excludes the peer from BUM destinations.
+func (p Peer) IsTreeNeighbor() bool {
+	return p.TreeNeighbor == nil || *p.TreeNeighbor
 }
 
 // L2Config describes the VXLAN + bridge data plane that rides on top of the
