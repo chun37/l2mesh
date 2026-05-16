@@ -16,7 +16,7 @@ import (
 
 const ConfigPath = "/var/lib/l2mesh/frr.conf"
 
-const configTmpl = `frr defaults datacenter
+const rootConfigTmpl = `frr defaults datacenter
 hostname {{.Node.Name}}
 !
 router bgp {{.Node.ASN}}
@@ -40,22 +40,39 @@ exit
 !
 `
 
-var tmpl = template.Must(template.New("frr").Parse(configTmpl))
+// Leaf nodes don't run BGP — the minimal config just keeps the hostname so
+// that frr-reload.py removes any prior router-bgp block when transitioning
+// Root → Leaf via demote.
+const leafConfigTmpl = `frr defaults datacenter
+hostname {{.Node.Name}}
+!
+`
 
-// GenerateConfig renders the FRR integrated config for the given state.
-// The local node is assumed to be a Root; callers should skip Leaf nodes.
+var (
+	rootTmpl = template.Must(template.New("frr-root").Parse(rootConfigTmpl))
+	leafTmpl = template.Must(template.New("frr-leaf").Parse(leafConfigTmpl))
+)
+
+// GenerateConfig renders the integrated FRR config for the given state. Root
+// nodes get the full BGP + EVPN block; Leaf nodes get a minimal stub so any
+// prior BGP config gets removed by frr-reload.py on demote.
 func GenerateConfig(s *state.State) (string, error) {
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, s); err != nil {
+	t := rootTmpl
+	if s.Node.Role != state.RoleRoot {
+		t = leafTmpl
+	}
+	if err := t.Execute(&buf, s); err != nil {
 		return "", fmt.Errorf("frr template: %w", err)
 	}
 	return buf.String(), nil
 }
 
 // Apply writes the generated config to ConfigPath and invokes frr-reload.py to
-// diff-apply it against the running FRR config. No-op on Leaf nodes.
+// diff-apply it against the running FRR config. On Leaf nodes it writes the
+// minimal stub so demote cleans up any inherited BGP config.
 func Apply(s *state.State) error {
-	if s.Node.Role != state.RoleRoot {
+	if !Installed() {
 		return nil
 	}
 	cfg, err := GenerateConfig(s)

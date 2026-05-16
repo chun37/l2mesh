@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/chun37/l2mesh/internal/frr"
+	"github.com/chun37/l2mesh/internal/l2"
 	"github.com/chun37/l2mesh/internal/state"
 	"github.com/chun37/l2mesh/internal/wg"
 	"github.com/spf13/cobra"
@@ -39,18 +40,41 @@ func runPeerRemove(cmd *cobra.Command, role state.Role, name string) error {
 }
 
 // applyFRRBestEffort reapplies the FRR config after a peer change. Failures are
-// reported as warnings so the state change still persists; the next `l2mesh sync`
-// (or `l2mesh frr apply`) can retry.
+// reported as warnings so the state change still persists; the next
+// `l2mesh sync` can retry.
 func applyFRRBestEffort(cmd *cobra.Command, s *state.State) {
-	if s.Node.Role != state.RoleRoot {
-		return
-	}
 	if !frr.Installed() {
 		return
 	}
 	if err := frr.Apply(s); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: FRR reload failed: %v\n", err)
 	}
+}
+
+// reconcileKernel pushes the in-memory state to the kernel (WG peers, L2
+// interfaces, BUM FDB) and FRR. Mirror of what `l2mesh sync` does but takes a
+// pre-loaded *State so it can run inside a WithLock callback.
+func reconcileKernel(cmd *cobra.Command, s *state.State) error {
+	wgClient, err := wg.New(s.Node.Interface)
+	if err != nil {
+		return fmt.Errorf("wg new: %w", err)
+	}
+	defer wgClient.Close()
+	if err := wgClient.Sync(s.FlatPeers()); err != nil {
+		return fmt.Errorf("wg sync: %w", err)
+	}
+	if err := l2.Up(s); err != nil {
+		return fmt.Errorf("l2 up: %w", err)
+	}
+	if err := l2.SyncFDB(s, peerVTEPs(s)); err != nil {
+		return fmt.Errorf("fdb sync: %w", err)
+	}
+	if frr.Installed() {
+		if err := frr.Apply(s); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: FRR apply failed: %v\n", err)
+		}
+	}
+	return nil
 }
 
 // Kernel WG updates are best-effort: if they fail the state.json change still
